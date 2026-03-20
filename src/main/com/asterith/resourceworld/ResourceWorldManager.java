@@ -20,7 +20,7 @@ public class ResourceWorldManager {
     public static final RegistryKey<World> RESOURCE_NETHER =
             RegistryKey.of(RegistryKeys.WORLD, new Identifier(ResourceWorldMod.MOD_ID, "nether"));
 
-    private static final int BORDER_SIZE = 20000;
+    private static final int BORDER_SIZE = 10000;
 
     public static void init() {
         ServerLifecycleEvents.SERVER_STARTED.register(ResourceWorldManager::onServerStarted);
