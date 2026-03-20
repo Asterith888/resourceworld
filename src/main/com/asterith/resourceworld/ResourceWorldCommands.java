@@ -11,9 +11,14 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 
+import java.util.Random;
+
 import static net.minecraft.server.command.CommandManager.literal;
 
 public class ResourceWorldCommands {
+
+    private static final int BORDER = 10000;
+    private static final Random RANDOM = new Random();
 
     public static void register() {
         CommandRegistrationCallback.EVENT.register(ResourceWorldCommands::registerCommands);
@@ -25,80 +30,127 @@ public class ResourceWorldCommands {
 
         dispatcher.register(
                 literal("resourceworld")
-                        .requires(src -> src.hasPermissionLevel(2))
-                        .then(literal("tp")
+                        // PLAYER COMMANDS (NO PERMISSION REQUIRED)
+                        .then(literal("rtp")
                                 .then(CommandManager.argument("world", StringArgumentType.word())
-                                        .executes(ctx -> {
-                                            String worldId = StringArgumentType.getString(ctx, "world");
-                                            return tpCommand(ctx.getSource(), worldId);
-                                        })))
+                                        .executes(ctx -> rtp(ctx.getSource(),
+                                                StringArgumentType.getString(ctx, "world")))))
+                        .then(literal("home")
+                                .executes(ctx -> home(ctx.getSource())))
+
+                        // ADMIN COMMANDS (OP REQUIRED)
+                        .then(literal("reset")
+                                .requires(src -> src.hasPermissionLevel(2))
+                                .then(CommandManager.argument("world", StringArgumentType.word())
+                                        .executes(ctx -> reset(ctx.getSource(),
+                                                StringArgumentType.getString(ctx, "world")))))
                         .then(literal("delete")
+                                .requires(src -> src.hasPermissionLevel(2))
                                 .then(CommandManager.argument("world", StringArgumentType.word())
-                                        .executes(ctx -> {
-                                            String worldId = StringArgumentType.getString(ctx, "world");
-                                            return deleteCommand(ctx.getSource(), worldId);
-                                        })))
+                                        .executes(ctx -> delete(ctx.getSource(),
+                                                StringArgumentType.getString(ctx, "world")))))
         );
     }
 
-    private static int tpCommand(ServerCommandSource source, String worldId) {
-        ServerPlayerEntity player;
-        try {
-            player = source.getPlayer();
-        } catch (Exception e) {
-            source.sendError(Text.literal("Must be a player."));
+    // -------------------------
+    // PLAYER COMMANDS
+    // -------------------------
+
+    private static int rtp(ServerCommandSource source, String worldId) {
+        ServerPlayerEntity player = source.getPlayer();
+        MinecraftServer server = source.getServer();
+
+        var world = switch (worldId.toLowerCase()) {
+            case "overworld" -> server.getWorld(ResourceWorldManager.RESOURCE_OVERWORLD);
+            case "nether" -> server.getWorld(ResourceWorldManager.RESOURCE_NETHER);
+            default -> null;
+        };
+
+        if (world == null) {
+            source.sendError(Text.literal("Unknown world. Use overworld or nether."));
             return 0;
         }
 
-        MinecraftServer server = source.getServer();
+        // Random X/Z inside border
+        int x = RANDOM.nextInt(BORDER * 2) - BORDER;
+        int z = RANDOM.nextInt(BORDER * 2) - BORDER;
 
-        if (worldId.equalsIgnoreCase("overworld")) {
-            var world = server.getWorld(ResourceWorldManager.RESOURCE_OVERWORLD);
-            if (world == null) {
-                source.sendError(Text.literal("Resource overworld not found."));
-                return 0;
-            }
-            player.teleport(world, 0.5, world.getTopY(), 0.5, player.getYaw(), player.getPitch());
-            source.sendFeedback(() -> Text.literal("Teleported to resource overworld."), false);
-            return 1;
+        // Find safe Y
+        int y = world.getTopY();
+        BlockPos pos = new BlockPos(x, y, z);
+
+        // Drop down to ground
+        while (y > world.getBottomY() && world.getBlockState(pos).isAir()) {
+            y--;
+            pos = new BlockPos(x, y, z);
         }
 
-        if (worldId.equalsIgnoreCase("nether")) {
-            var world = server.getWorld(ResourceWorldManager.RESOURCE_NETHER);
-            if (world == null) {
-                source.sendError(Text.literal("Resource nether not found."));
-                return 0;
-            }
-            player.teleport(world, 0.5, 80, 0.5, player.getYaw(), player.getPitch());
-            source.sendFeedback(() -> Text.literal("Teleported to resource nether."), false);
-            return 1;
-        }
+        // Move up to safe spot
+        y += 2;
 
-        source.sendError(Text.literal("Unknown world. Use 'overworld' or 'nether'."));
-        return 0;
+        player.teleport(world, x + 0.5, y, z + 0.5, player.getYaw(), player.getPitch());
+        source.sendFeedback(() -> Text.literal("Randomly teleported!"), false);
+        return 1;
     }
 
-    private static int deleteCommand(ServerCommandSource source, String worldId) {
+    private static int home(ServerCommandSource source) {
+        ServerPlayerEntity player = source.getPlayer();
         MinecraftServer server = source.getServer();
 
-        boolean success;
-        if (worldId.equalsIgnoreCase("overworld")) {
-            success = ResourceWorldManager.deleteResourceWorldFolder(server, ResourceWorldManager.RESOURCE_OVERWORLD);
-        } else if (worldId.equalsIgnoreCase("nether")) {
-            success = ResourceWorldManager.deleteResourceWorldFolder(server, ResourceWorldManager.RESOURCE_NETHER);
-        } else {
-            source.sendError(Text.literal("Unknown world. Use 'overworld' or 'nether'."));
+        // Player bed/anchor
+        var spawnPos = player.getSpawnPointPosition();
+        var spawnDim = player.getSpawnPointDimension();
+
+        if (spawnPos != null && spawnDim != null) {
+            var world = server.getWorld(spawnDim);
+            if (world != null) {
+                player.teleport(world,
+                        spawnPos.getX() + 0.5,
+                        spawnPos.getY(),
+                        spawnPos.getZ() + 0.5,
+                        player.getYaw(),
+                        player.getPitch());
+                return 1;
+            }
+        }
+
+        // Fallback: overworld spawn
+        var overworld = server.getOverworld();
+        BlockPos spawn = overworld.getSpawnPos();
+
+        player.teleport(overworld,
+                spawn.getX() + 0.5,
+                spawn.getY(),
+                spawn.getZ() + 0.5,
+                player.getYaw(),
+                player.getPitch());
+
+        return 1;
+    }
+
+    // -------------------------
+    // ADMIN COMMANDS
+    // -------------------------
+
+    private static int reset(ServerCommandSource source, String worldId) {
+        return delete(source, worldId); // delete now, regenerate on restart
+    }
+
+    private static int delete(ServerCommandSource source, String worldId) {
+        MinecraftServer server = source.getServer();
+
+        boolean ok = switch (worldId.toLowerCase()) {
+            case "overworld" -> ResourceWorldManager.deleteResourceWorldFolder(server, ResourceWorldManager.RESOURCE_OVERWORLD);
+            case "nether" -> ResourceWorldManager.deleteResourceWorldFolder(server, ResourceWorldManager.RESOURCE_NETHER);
+            default -> false;
+        };
+
+        if (!ok) {
+            source.sendError(Text.literal("Could not delete world folder."));
             return 0;
         }
 
-        if (success) {
-            source.sendFeedback(() -> Text.literal(
-                    "Deleted resource " + worldId + " folder. Restart the server to regenerate with a new seed."
-            ), true);
-            return 1;
-        } else {
-            source.sendError(Text.literal("Folder not found or could not be deleted."));
-            return 0;
-        }
+        source.sendFeedback(() -> Text.literal("Deleted. Restart server to regenerate."), true);
+        return 1;
     }
 }
