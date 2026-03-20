@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "id": "resourceworld",
-  "version": "1.0.0",
+  "version": "${version}",
   "name": "Resource World",
-  "description": "Simple overworld + nether resource worlds with reset support.",
+  "description": "Overworld + Nether resource worlds with RTP, home, and reset.",
   "authors": ["Logan"],
   "license": "MIT",
   "environment": "server",
@@ -15,6 +15,6 @@
   "depends": {
     "fabricloader": ">=0.15.0",
     "fabric": "*",
-    "minecraft": "1.21.x"
+    "minecraft": "1.21.11"
   }
 }
